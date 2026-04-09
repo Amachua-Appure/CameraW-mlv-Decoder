@@ -29,6 +29,5 @@ Upon successful execution, the decoder will output:
     audio.wav (if an audio stream was muxed during capture).
     A sequential list of DNG files (e.g., frame_0000.dng, frame_0001.dng) ready for import into DaVinci Resolve, Adobe Premiere, or other RAW video editors.
     
-----
 
 ***
