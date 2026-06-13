@@ -44,18 +44,31 @@ THE SOFTWARE.
 # include <io.h>
 #else
 # include <unistd.h>
+//extern "C" {
+//    int write (int fd, const char* buf, int num);
+//    int read (int fd, char* buf, int num);
+//}
 #endif
 
 
 namespace boost {
 
+
+/************************************************************
+ * fdostream
+ * - a stream that writes on a file descriptor
+ ************************************************************/
+
+
 class fdoutbuf : public std::streambuf {
   protected:
-    int fd;
+    int fd;    // file descriptor
   public:
+    // constructor
     fdoutbuf (int _fd) : fd(_fd) {
     }
   protected:
+    // write one character
     virtual int_type overflow (int_type c) {
         if (c != EOF) {
             char z = c;
@@ -65,6 +78,7 @@ class fdoutbuf : public std::streambuf {
         }
         return c;
     }
+    // write multiple characters
     virtual
     std::streamsize xsputn (const char* s,
                             std::streamsize num) {
@@ -81,7 +95,7 @@ class fdostream : public std::ostream {
     }
 };
 
-}
+} // END namespace boost
 
 namespace tinydngwriter {
 
@@ -102,21 +116,22 @@ typedef enum {
   TIFFTAG_PLANAR_CONFIG = 284,
   TIFFTAG_ORIENTATION = 274,
 
-  TIFFTAG_XRESOLUTION = 282,
-  TIFFTAG_YRESOLUTION = 283,
+  TIFFTAG_XRESOLUTION = 282,  // rational
+  TIFFTAG_YRESOLUTION = 283,  // rational
   TIFFTAG_RESOLUTION_UNIT = 296,
 
   TIFFTAG_SOFTWARE = 305,
 
   TIFFTAG_SAMPLEFORMAT = 339,
 
+  // DNG extension
   TIFFTAG_CFA_REPEAT_PATTERN_DIM = 33421,
   TIFFTAG_CFA_PATTERN = 33422,
 
   TIFFTAG_CAMERA_EXPOSURE_TIME = 33434,
   TIFFTAG_CAMERA_ISO = 34855,
-  TIFFTAG_FNUMBER = 33437,
-  TIFFTAG_FOCALLENGTH = 37386,
+  TIFFTAG_FNUMBER = 33437,           // added: FNumber (rational)
+  TIFFTAG_FOCALLENGTH = 37386,       // added: FocalLength (rational)
 
   TIFFTAG_CFA_LAYOUT = 50711,
 
@@ -134,7 +149,7 @@ typedef enum {
   TIFFTAG_ANALOG_BALANCE = 50727,
   TIFFTAG_AS_SHOT_NEUTRAL = 50728,
   TIFFTAG_AS_SHOT_WHITE_XY = 50729,
-  TIFFTAG_BASELINE_EXPOSURE = 50730,
+  TIFFTAG_BASELINE_EXPOSURE = 50730, // per file exposure compensation offset recognized by davinci resolve
   TIFFTAG_CALIBRATION_ILLUMINANT1 = 50778,
   TIFFTAG_CALIBRATION_ILLUMINANT2 = 50779,
   TIFFTAG_EXTRA_CAMERA_PROFILES = 50933,
@@ -146,25 +161,33 @@ typedef enum {
   TIFFTAG_FORWARD_MATRIX2 = 50965,
   TIFFTAG_LINEARIZATION_TABLE = 50712,
 
+  // Noise profile
   TIFFTAG_NOISE_PROFILE = 51041,
 
+  // CinemaDNG specific
   TIFFTAG_TIMECODE = 51043,
   TIFFTAG_FPS = 51044,
 
+  // Opcode Lists
   TIFFTAG_OPCODE_LIST1 = 51008,
   TIFFTAG_OPCODE_LIST2 = 51009,
   TIFFTAG_OPCODE_LIST3 = 51022
 } Tag;
 
+// SUBFILETYPE(bit field)
 static const int FILETYPE_REDUCEDIMAGE = 1;
 static const int FILETYPE_PAGE = 2;
 static const int FILETYPE_MASK = 4;
 
+// PLANARCONFIG
 static const int PLANARCONFIG_CONTIG = 1;
 static const int PLANARCONFIG_SEPARATE = 2;
 
+// COMPRESSION
+// TODO(syoyo) more compressin types.
 static const int COMPRESSION_NONE = 1;
 
+// ORIENTATION
 static const int ORIENTATION_TOPLEFT = 1;
 static const int ORIENTATION_TOPRIGHT = 2;
 static const int ORIENTATION_BOTRIGHT = 3;
@@ -174,20 +197,25 @@ static const int ORIENTATION_RIGHTTOP = 6;
 static const int ORIENTATION_RIGHTBOT = 7;
 static const int ORIENTATION_LEFTBOT = 8;
 
+// RESOLUTIONUNIT
 static const int RESUNIT_NONE = 1;
 static const int RESUNIT_INCH = 2;
 static const int RESUNIT_CENTIMETER = 2;
 
-static const int PHOTOMETRIC_WHITE_IS_ZERO = 0;
-static const int PHOTOMETRIC_BLACK_IS_ZERO = 1;
-static const int PHOTOMETRIC_RGB = 2;
-static const int PHOTOMETRIC_CFA = 32803;
-static const int PHOTOMETRIC_LINEARRAW = 34892;
+// PHOTOMETRIC
+// TODO(syoyo): more photometric types.
+static const int PHOTOMETRIC_WHITE_IS_ZERO = 0;  // For bilevel and grayscale
+static const int PHOTOMETRIC_BLACK_IS_ZERO = 1;  // For bilevel and grayscale
+static const int PHOTOMETRIC_RGB = 2;            // Default
+static const int PHOTOMETRIC_CFA = 32803;        // DNG ext
+static const int PHOTOMETRIC_LINEARRAW = 34892;  // DNG ext
 
-static const int SAMPLEFORMAT_UINT = 1;
+// Sample format
+static const int SAMPLEFORMAT_UINT = 1;  // Default
 static const int SAMPLEFORMAT_INT = 2;
-static const int SAMPLEFORMAT_IEEEFP = 3;
+static const int SAMPLEFORMAT_IEEEFP = 3;  // floating point
 
+// Opcode IDs
 static const int OPCODE_WARP_RECTILINEAR = 1;
 static const int OPCODE_FIX_BAD_PIXELS_LIST = 5;
 static const int OPCODE_GAIN_MAP = 9;
@@ -198,7 +226,9 @@ struct IFDTag {
   unsigned int count;
   unsigned int offset_or_value;
 };
+// 12 bytes.
 
+// Opcode structures
 struct BadPixel {
   unsigned int row;
   unsigned int column;
@@ -213,9 +243,9 @@ struct BadRect {
 
 struct WarpRectilinearParams {
   unsigned int num_coeff_sets;
-  std::vector<double> kr0, kr1, kr2, kr3;
-  std::vector<double> kt0, kt1;
-  double cx_hat, cy_hat;
+  std::vector<double> kr0, kr1, kr2, kr3;  // Radial coefficients
+  std::vector<double> kt0, kt1;            // Tangential coefficients
+  double cx_hat, cy_hat;                   // Normalized optical center
 };
 
 struct FixBadPixelsParams {
@@ -249,7 +279,7 @@ public:
 private:
   struct Opcode {
     unsigned int id;
-    unsigned int version[4];
+    unsigned int version[4];  // DNG version
     unsigned int flags;
     std::vector<unsigned char> data;
   };
@@ -262,8 +292,15 @@ class DNGImage {
   DNGImage();
   ~DNGImage() {}
 
+  ///
+  /// Optional: Explicitly specify endian.
+  /// Must be called before calling other Set methods.
+  ///
   void SetBigEndian(bool big_endian);
 
+  ///
+  /// Default = 0
+  ///
   bool SetSubfileType(bool reduced_image = false, bool page = false,
                       bool mask = false);
 
@@ -271,6 +308,7 @@ class DNGImage {
   bool SetImageLength(unsigned int value);
   bool SetRowsPerStrip(unsigned int value);
   bool SetSamplesPerPixel(unsigned short value);
+  // Set bits for each samples
   bool SetBitsPerSample(const unsigned int num_samples,
                         const unsigned short *values);
   bool SetPhotometric(unsigned short value);
@@ -289,47 +327,77 @@ class DNGImage {
   bool SetIso(unsigned short iso);
   bool SetFocalLength(float focal_length_mm);
   bool SetAperture(float f_number);
-
+// --- CUSTOM EXIF / DNG TAG INJECTORS ---
   bool SetMatrixTag(unsigned short tag, const float m[9]);
   bool SetShortTag(unsigned short tag, unsigned short val);
   bool SetLongArrayTag(unsigned short tag, unsigned int count, const unsigned int* val);
   bool SetStringTag(unsigned short tag, const char* str);
-
+  bool SetByteArrayTag(unsigned short tag, const unsigned char* data, size_t size);
+  bool SetRationalTag(unsigned short tag, unsigned int num, unsigned int den);
+  ///
+  /// Set arbitrary string for image description.
+  /// Currently we limit to 1024*1024 chars at max.
+  ///
   bool SetImageDescription(const std::string &ascii);
 
+  ///
+  /// Set arbitrary string for unique camera model name (not localized!).
+  /// Currently we limit to 1024*1024 chars at max.
+  ///
   bool SetUniqueCameraModel(const std::string &ascii);
 
+  ///
+  /// Set camera make (manufacturer) string.
+  /// Currently we limit to 1024*1024 chars at max.
+  ///
   bool SetMake(const std::string &ascii);
 
+  ///
+  /// Set camera model name string.
+  /// Currently we limit to 1024*1024 chars at max.
+  ///
   bool SetCameraModelName(const std::string &ascii);
 
+  ///
+  /// Set software description(string).
+  /// Currently we limit to 4095 chars at max.
+  ///
   bool SetSoftware(const std::string &ascii);
 
   bool SetActiveArea(const unsigned int values[4]);
 
   bool SetChromaBlurRadius(float value);
 
+  /// Specify black level per sample.
   bool SetBlackLevel(const unsigned int num_samples, const unsigned short *values);
 
+  /// Specify black level per sample (as rational values).
   bool SetBlackLevelRational(unsigned int num_samples, const float *values);
 
+  /// Specify white level per sample.
   bool SetWhiteLevel(const short value);
   bool SetWhiteLevelRational(unsigned int num_samples, const float *values);
 
+  /// Specify analog white balance from camera for raw values.
   bool SetAnalogBalance(const unsigned int plane_count, const float *matrix_values);
 
+  /// Specify CFA repeating pattern dimensions.
   bool SetCFARepeatPatternDim(const unsigned short width, const unsigned short height);
 
+  /// Specify black level repeating pattern dimensions.
   bool SetBlackLevelRepeatDim(const unsigned short width, const unsigned short height);
 
   bool SetCalibrationIlluminant1(const unsigned short value);
   bool SetCalibrationIlluminant2(const unsigned short value);
 
+  /// Specify DNG version.
   bool SetDNGVersion(const unsigned char a, const unsigned char b, const unsigned char c, const unsigned char d);
   bool SetDNGBackwardVersion(const unsigned char a, const unsigned char b, const unsigned char c, const unsigned char d);
 
+  /// Specify transformation matrix (XYZ to reference camera native color space values, under the first calibration illuminant).
   bool SetColorMatrix1(const unsigned int plane_count, const float *matrix_values);
 
+  /// Specify transformation matrix (XYZ to reference camera native color space values, under the second calibration illuminant).
   bool SetColorMatrix2(const unsigned int plane_count, const float *matrix_values);
 
   bool SetForwardMatrix1(const unsigned int plane_count, const float *matrix_values);
@@ -338,30 +406,53 @@ class DNGImage {
   bool SetCameraCalibration1(const unsigned int plane_count, const float *matrix_values);
   bool SetCameraCalibration2(const unsigned int plane_count, const float *matrix_values);
 
+  /// Specify CFA geometric pattern (left-to-right, top-to-bottom).
   bool SetCFAPattern(const unsigned int num_components, const unsigned char *values);
   bool SetCFALayout(const unsigned short value);
   
+  /// Specify the selected white balance at time of capture, encoded as the coordinates of a perfectly neutral color in linear reference space values.
   bool SetAsShotNeutral(const unsigned int plane_count, const float *matrix_values);
 
+  /// Specify the the selected white balance at time of capture, encoded as x-y chromaticity coordinates.
   bool SetAsShotWhiteXY(const float x, const float y);
 
+  /// Set baseline exposure value in EV units
   bool SetBaselineExposure(float value);
 
-  bool SetNoiseProfile(const double values[6]);
+  /// Set noise profile (dynamic length: e.g., 6 for RGB, 8 for Bayer)
+  bool SetNoiseProfile(const unsigned int num_values, const double *values);
 
+  /// Set linearization table for converting stored values to linear values.
+  /// The table maps stored pixel values to linear values using direct mapping.
+  /// @param[in] table_size Number of entries in the linearization table (should be 2^input_bits)
+  /// @param[in] table_values Array of linear output values (TIFF_SHORT format, 0-65535)
   bool SetLinearizationTable(const unsigned int table_size, const unsigned short *table_values);
 
+  /// Generate and set linearization table for log-to-linear conversion.
+  /// Creates a direct mapping table from log-encoded values to 16-bit linear values.
+  /// @param[in] input_bits Bit depth of input log data (e.g., 10, 12, 14)
+  /// @param[in] log_base Base of the logarithm (e.g., 2.0 for log2, 10.0 for log10)
+  /// @param[in] black_level Black level in linear space (0-65535)
+  /// @param[in] white_level White level in linear space (0-65535)
   bool SetLogLinearizationTable(const unsigned int input_bits, const float log_base = 2.0f, 
                                const unsigned short black_level = 0, const unsigned short white_level = 65535);
 
+  /// Set opcode list 1 (applied to raw image as read from file)
   bool SetOpcodeList1(const OpcodeList& opcode_list);
+  
+  /// Set opcode list 2 (applied after mapping to linear reference values)
   bool SetOpcodeList2(const OpcodeList& opcode_list);
+  
+  /// Set opcode list 3 (applied after demosaicing)
   bool SetOpcodeList3(const OpcodeList& opcode_list);
 
+  /// Set image data with packing (take 16-bit values and pack them to input_bpp values).
   bool SetImageDataPacked(const unsigned short *input_buffer, const int input_count, const unsigned int input_bpp, bool big_endian);
 
+  /// Set image data.
   bool SetImageData(const unsigned char *data, const size_t data_len);
 
+  /// Set custom field.
   bool SetCustomFieldLong(const unsigned short tag, const int value);
   bool SetCustomFieldULong(const unsigned short tag, const unsigned int value);
 
@@ -370,8 +461,17 @@ class DNGImage {
   size_t GetStripOffset() const { return data_strip_offset_; }
   size_t GetStripBytes() const { return data_strip_bytes_; }
 
+  /// Write aux IFD data and strip image data to stream.
   bool WriteDataToStream(std::ostream *ofs) const;
 
+  ///
+  /// Write IFD to stream.
+  ///
+  /// @param[in] data_base_offset : Byte offset to data
+  /// @param[in] strip_offset : Byte offset to image strip data
+  ///
+  /// TODO(syoyo): Support multiple strips
+  ///
   bool WriteIFDToStream(const unsigned int data_base_offset,
                         const unsigned int strip_offset, std::ostream *ofs) const;
 
@@ -385,41 +485,59 @@ class DNGImage {
   unsigned int samples_per_pixels_;
   std::vector<unsigned short> bits_per_samples_;
 
+  // TODO(syoyo): Support multiple strips
   size_t data_strip_offset_{0};
   size_t data_strip_bytes_{0};
 
-  mutable std::string err_;
+  mutable std::string err_;  // Error message
 
   std::vector<IFDTag> ifd_tags_;
 };
 
 class DNGWriter {
  public:
+  // TODO(syoyo): Use same endian setting with DNGImage.
   DNGWriter(bool big_endian);
   ~DNGWriter() {}
 
+  ///
+  /// Add DNGImage.
+  /// It just retains the pointer of the image, thus
+  /// application must not free resources until `WriteToFile` has been called.
+  ///
   bool AddImage(const DNGImage *image) {
     images_.push_back(image);
 
     return true;
   }
 
+  /// Write DNG to a file.
+  /// Return error string to `err` when Write() returns false.
+  /// Returns true upon success.
   bool WriteToFile(const char *filename, std::string *err) const;
   bool WriteToFile(int fd, std::string *err) const;
   bool WriteToFile(std::ostream& stream, std::string *err) const;
   
  private:
   bool swap_endian_;
-  bool dng_big_endian_;
+  bool dng_big_endian_;  // Endianness of DNG file.
 
   std::vector<const DNGImage *> images_;
 };
 
-}
+}  // namespace tinydngwriter
 
 #endif  // TINY_DNG_WRITER_H_
 
 #ifdef TINY_DNG_WRITER_IMPLEMENTATION
+
+//
+// TIFF format resources.
+//
+// http://c0de517e.blogspot.jp/2013/07/tiny-hdr-writer.html
+// http://paulbourke.net/dataformats/tiff/ and
+// http://partners.adobe.com/public/developer/en/tiff/TIFF6.pdf
+//
 
 #include <algorithm>
 #include <cassert>
@@ -441,28 +559,70 @@ namespace tinydngwriter {
 #endif
 #endif
 
+//
+// TinyDNGWriter stores IFD table in the end of file so that offset to
+// image data can be easily computed.
+//
+// +----------------------+
+// |    header            |
+// +----------------------+
+// |                      |
+// |  image & meta 0      |
+// |                      |
+// +----------------------+
+// |                      |
+// |  image & meta 1      |
+// |                      |
+// +----------------------+
+//    ...
+// +----------------------+
+// |                      |
+// |  image & meta N      |
+// |                      |
+// +----------------------+
+// |                      |
+// |  IFD 0               |
+// |                      |
+// +----------------------+
+// |                      |
+// |  IFD 1               |
+// |                      |
+// +----------------------+
+//    ...
+// +----------------------+
+// |                      |
+// |  IFD 2               |
+// |                      |
+// +----------------------+
+//
+
+// From tiff.h
 typedef enum {
-  TIFF_NOTYPE = 0,
-  TIFF_BYTE = 1,
-  TIFF_ASCII = 2,
-  TIFF_SHORT = 3,
-  TIFF_LONG = 4,
-  TIFF_RATIONAL = 5,
-  TIFF_SBYTE = 6,
-  TIFF_UNDEFINED = 7,
-  TIFF_SSHORT = 8,
-  TIFF_SLONG = 9,
-  TIFF_SRATIONAL = 10,
-  TIFF_FLOAT = 11,
-  TIFF_DOUBLE = 12,
-  TIFF_IFD = 13,
-  TIFF_LONG8 = 16,
-  TIFF_SLONG8 = 17,
-  TIFF_IFD8 = 18
+  TIFF_NOTYPE = 0,     /* placeholder */
+  TIFF_BYTE = 1,       /* 8-bit unsigned integer */
+  TIFF_ASCII = 2,      /* 8-bit bytes w/ last byte null */
+  TIFF_SHORT = 3,      /* 16-bit unsigned integer */
+  TIFF_LONG = 4,       /* 32-bit unsigned integer */
+  TIFF_RATIONAL = 5,   /* 64-bit unsigned fraction */
+  TIFF_SBYTE = 6,      /* !8-bit signed integer */
+  TIFF_UNDEFINED = 7,  /* !8-bit untyped data */
+  TIFF_SSHORT = 8,     /* !16-bit signed integer */
+  TIFF_SLONG = 9,      /* !32-bit signed integer */
+  TIFF_SRATIONAL = 10, /* !64-bit signed fraction */
+  TIFF_FLOAT = 11,     /* !32-bit IEEE floating point */
+  TIFF_DOUBLE = 12,    /* !64-bit IEEE floating point */
+  TIFF_IFD = 13,       /* %32-bit unsigned integer (offset) */
+  TIFF_LONG8 = 16,     /* BigTIFF 64-bit unsigned integer */
+  TIFF_SLONG8 = 17,    /* BigTIFF 64-bit signed integer */
+  TIFF_IFD8 = 18       /* BigTIFF 64-bit unsigned integer (offset) */
 } DataType;
 
-const static int kHeaderSize = 8;
+const static int kHeaderSize = 8;  // TIFF header size.
 
+// floating point to integer rational value conversion
+// https://stackoverflow.com/questions/51142275/exact-value-of-a-floating-point-number-as-a-rational
+//
+// Return error flag
 static int FloatToRational(float x, float *numerator, float *denominator) {
   if (!std::isfinite(x)) {
     *numerator = *denominator = 0.0f;
@@ -471,6 +631,7 @@ static int FloatToRational(float x, float *numerator, float *denominator) {
     return 1;
   }
 
+  // TIFF Rational use two uint32's, so reduce the bits
   int bdigits = FLT_MANT_DIG;
   int expo;
   *denominator = 1.0f;
@@ -603,7 +764,8 @@ static bool WriteTIFFTag(const unsigned short tag, const unsigned short type,
                          const unsigned int count, const unsigned char *data,
                          std::vector<IFDTag> *tags_out,
                          std::ostringstream *data_out) {
-  assert(sizeof(IFDTag) == 12);
+  assert(sizeof(IFDTag) ==
+         12);  // FIXME(syoyo): Use static_assert for C++11 compiler
 
   IFDTag ifd;
   ifd.tag = tag;
@@ -619,6 +781,8 @@ static bool WriteTIFFTag(const unsigned short tag, const unsigned short type,
       return false;
     }
 
+    // Store offset value.
+
     unsigned int offset =
         static_cast<unsigned int>(data_out->tellp()) + kHeaderSize;
     ifd.offset_or_value = offset;
@@ -629,6 +793,7 @@ static bool WriteTIFFTag(const unsigned short tag, const unsigned short type,
   } else {
     ifd.offset_or_value = 0;
 
+    // less than 4 bytes = store data itself.
     if (len == 1) {
       unsigned char value = *(data);
       memcpy(&(ifd.offset_or_value), &value, sizeof(unsigned char));
@@ -649,15 +814,18 @@ static bool WriteTIFFTag(const unsigned short tag, const unsigned short type,
 }
 
 static bool WriteTIFFVersionHeader(std::ostringstream *out, bool big_endian) {
+  // TODO(syoyo): Support BigTIFF?
+
+  // 4d 4d = Big endian. 49 49 = Little endian.
   if (big_endian) {
     Write1(0x4d, out);
     Write1(0x4d, out);
     Write1(0x0, out);
-    Write1(0x2a, out);
+    Write1(0x2a, out);  // Tiff version ID
   } else {
     Write1(0x49, out);
     Write1(0x49, out);
-    Write1(0x2a, out);
+    Write1(0x2a, out);  // Tiff version ID
     Write1(0x0, out);
   }
 
@@ -778,7 +946,7 @@ bool DNGImage::SetSamplesPerPixel(const unsigned short value) {
     return false;
   }
 
-  samples_per_pixels_ = value;
+  samples_per_pixels_ = value;  // Store SPP for later use.
 
   num_fields_++;
   return true;
@@ -786,6 +954,9 @@ bool DNGImage::SetSamplesPerPixel(const unsigned short value) {
 
 bool DNGImage::SetBitsPerSample(const unsigned int num_samples,
                                 const unsigned short *values) {
+  // `SetSamplesPerPixel()` must be called in advance and SPP shoud be equal to
+  // `num_samples`.
+
   if (samples_per_pixels_ == 0) {
     err_ += "SetSamplesPerPixel() must be called before SetBitsPerSample().\n";
     return false;
@@ -802,12 +973,14 @@ bool DNGImage::SetBitsPerSample(const unsigned int num_samples,
     err_ += ss.str();
     return false;
   } else {
+    // ok
   }
 
   unsigned short bps = values[0];
 
   std::vector<unsigned short> vs(num_samples);
   for (size_t i = 0; i < vs.size(); i++) {
+    // FIXME(syoyo): Currently bps must be same for all samples
     if (bps != values[i]) {
       err_ += "BitsPerSample must be same among samples at the moment.\n";
       return false;
@@ -815,6 +988,7 @@ bool DNGImage::SetBitsPerSample(const unsigned int num_samples,
 
     vs[i] = values[i];
 
+    // TODO(syoyo): Swap values when writing IFD tag, not here.
     if (swap_endian_) {
       swap2(&vs[i]);
     }
@@ -831,6 +1005,7 @@ bool DNGImage::SetBitsPerSample(const unsigned int num_samples,
     return false;
   }
 
+  // Store BPS for later use.
   bits_per_samples_.resize(num_samples);
   for (size_t i = 0; i < num_samples; i++) {
     bits_per_samples_[i] = values[i];
@@ -846,6 +1021,7 @@ bool DNGImage::SetPhotometric(const unsigned short value) {
       (value == PHOTOMETRIC_RGB) ||
       (value == PHOTOMETRIC_WHITE_IS_ZERO) ||
       (value == PHOTOMETRIC_BLACK_IS_ZERO)) {
+    // OK
   } else {
     return false;
   }
@@ -869,6 +1045,7 @@ bool DNGImage::SetPlanarConfig(const unsigned short value) {
   unsigned int count = 1;
 
   if ((value == PLANARCONFIG_CONTIG) || (value == PLANARCONFIG_SEPARATE)) {
+    // OK
   } else {
     return false;
   }
@@ -890,6 +1067,7 @@ bool DNGImage::SetCompression(const unsigned short value) {
   unsigned int count = 1;
 
   if ((value == COMPRESSION_NONE)) {
+    // OK
   } else {
     return false;
   }
@@ -909,7 +1087,9 @@ bool DNGImage::SetCompression(const unsigned short value) {
 
 bool DNGImage::SetSampleFormat(const unsigned int num_samples,
                                const unsigned short *values) {
+  // `SetSamplesPerPixel()` must be called in advance
   if ((num_samples > 0) && (num_samples == samples_per_pixels_)) {
+    // OK
   } else {
     err_ += "SetSamplesPerPixel() must be called before SetSampleFormat().\n";
     return false;
@@ -919,6 +1099,7 @@ bool DNGImage::SetSampleFormat(const unsigned int num_samples,
 
   std::vector<unsigned short> vs(num_samples);
   for (size_t i = 0; i < vs.size(); i++) {
+    // FIXME(syoyo): Currently format must be same for all samples
     if (format != values[i]) {
       err_ += "SampleFormat must be same among samples at the moment.\n";
       return false;
@@ -926,6 +1107,7 @@ bool DNGImage::SetSampleFormat(const unsigned int num_samples,
 
     if ((format == SAMPLEFORMAT_UINT) || (format == SAMPLEFORMAT_INT) ||
         (format == SAMPLEFORMAT_IEEEFP)) {
+      // OK
     } else {
       err_ += "Invalid format value specified for SetSampleFormat().\n";
       return false;
@@ -933,6 +1115,7 @@ bool DNGImage::SetSampleFormat(const unsigned int num_samples,
 
     vs[i] = values[i];
 
+    // TODO(syoyo): Swap values when writing IFD tag, not here.
     if (swap_endian_) {
       swap2(&vs[i]);
     }
@@ -960,6 +1143,7 @@ bool DNGImage::SetOrientation(const unsigned short value) {
       (value == ORIENTATION_BOTRIGHT) || (value == ORIENTATION_BOTLEFT) ||
       (value == ORIENTATION_LEFTTOP) || (value == ORIENTATION_RIGHTTOP) ||
       (value == ORIENTATION_RIGHTBOT) || (value == ORIENTATION_LEFTBOT)) {
+    // OK
   } else {
     return false;
   }
@@ -993,7 +1177,10 @@ bool DNGImage::SetBlackLevel(const unsigned int num_components,
 
 bool DNGImage::SetBlackLevelRational(unsigned int num_samples,
                                      const float *values) {
+  // `SetSamplesPerPixel()` must be called in advance and SPP shoud be equal to
+  // `num_samples`.
   if ((num_samples > 0) && (num_samples == samples_per_pixels_)) {
+    // OK
   } else {
     return false;
   }
@@ -1002,12 +1189,14 @@ bool DNGImage::SetBlackLevelRational(unsigned int num_samples,
   for (size_t i = 0; i * 2 < vs.size(); i++) {
     float numerator, denominator;
     if (FloatToRational(values[i], &numerator, &denominator) != 0) {
+      // Couldn't represent fp value as integer rational value.
       return false;
     }
 
     vs[2 * i + 0] = static_cast<unsigned int>(numerator);
     vs[2 * i + 1] = static_cast<unsigned int>(denominator);
 
+    // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
     if (swap_endian_) {
       swap4(&vs[2 * i + 0]);
       swap4(&vs[2 * i + 1]);
@@ -1045,7 +1234,10 @@ bool DNGImage::SetWhiteLevel(const short value) {
 
 bool DNGImage::SetWhiteLevelRational(unsigned int num_samples,
                                      const float *values) {
+  // `SetSamplesPerPixel()` must be called in advance and SPP shoud be equal to
+  // `num_samples`.
   if ((num_samples > 0) && (num_samples == samples_per_pixels_)) {
+    // OK
   } else {
     return false;
   }
@@ -1054,12 +1246,14 @@ bool DNGImage::SetWhiteLevelRational(unsigned int num_samples,
   for (size_t i = 0; i * 2 < vs.size(); i++) {
     float numerator, denominator;
     if (FloatToRational(values[i], &numerator, &denominator) != 0) {
+      // Couldn't represent fp value as integer rational value.
       return false;
     }
 
     vs[2 * i + 0] = static_cast<unsigned int>(numerator);
     vs[2 * i + 1] = static_cast<unsigned int>(denominator);
 
+    // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
     if (swap_endian_) {
       swap4(&vs[2 * i + 0]);
       swap4(&vs[2 * i + 1]);
@@ -1084,6 +1278,7 @@ bool DNGImage::SetWhiteLevelRational(unsigned int num_samples,
 bool DNGImage::SetXResolution(const float value) {
   float numerator, denominator;
   if (FloatToRational(value, &numerator, &denominator) != 0) {
+    // Couldn't represent fp value as integer rational value.
     return false;
   }
 
@@ -1091,6 +1286,7 @@ bool DNGImage::SetXResolution(const float value) {
   data[0] = static_cast<unsigned int>(numerator);
   data[1] = static_cast<unsigned int>(denominator);
 
+  // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
   if (swap_endian_) {
     swap4(&data[0]);
     swap4(&data[1]);
@@ -1111,6 +1307,7 @@ bool DNGImage::SetXResolution(const float value) {
 bool DNGImage::SetYResolution(const float value) {
   float numerator, denominator;
   if (FloatToRational(value, &numerator, &denominator) != 0) {
+    // Couldn't represent fp value as integer rational value.
     return false;
   }
 
@@ -1118,6 +1315,7 @@ bool DNGImage::SetYResolution(const float value) {
   data[0] = static_cast<unsigned int>(numerator);
   data[1] = static_cast<unsigned int>(denominator);
 
+  // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
   if (swap_endian_) {
     swap4(&data[0]);
     swap4(&data[1]);
@@ -1140,6 +1338,7 @@ bool DNGImage::SetResolutionUnit(const unsigned short value) {
 
   if ((value == RESUNIT_NONE) || (value == RESUNIT_INCH) ||
       (value == RESUNIT_CENTIMETER)) {
+    // OK
   } else {
     return false;
   }
@@ -1160,6 +1359,7 @@ bool DNGImage::SetResolutionUnit(const unsigned short value) {
 bool DNGImage::SetFrameRate(float value) {
   float numerator, denominator;
   if (FloatToRational(value, &numerator, &denominator) != 0) {
+    // Couldn't represent fp value as integer rational value.
     return false;
   }
 
@@ -1196,6 +1396,7 @@ bool DNGImage::SetTimeCode(unsigned char timecode[8]) {
 bool DNGImage::SetExposureTime(float exposureSecs) {
   float numerator, denominator;
   if (FloatToRational(exposureSecs, &numerator, &denominator) != 0) {
+    // Couldn't represent fp value as integer rational value.
     return false;
   }
 
@@ -1270,13 +1471,15 @@ bool DNGImage::SetAperture(float f_number) {
 
 bool DNGImage::SetImageDescription(const std::string &ascii) {
   unsigned int count =
-      static_cast<unsigned int>(ascii.length() + 1);
+      static_cast<unsigned int>(ascii.length() + 1);  // +1 for '\0'
 
   if (count < 2) {
+    // empty string
     return false;
   }
 
   if (count > (1024 * 1024)) {
+    // too large
     return false;
   }
 
@@ -1295,13 +1498,15 @@ bool DNGImage::SetImageDescription(const std::string &ascii) {
 
 bool DNGImage::SetUniqueCameraModel(const std::string &ascii) {
   unsigned int count =
-      static_cast<unsigned int>(ascii.length() + 1);
+      static_cast<unsigned int>(ascii.length() + 1);  // +1 for '\0'
 
   if (count < 2) {
+    // empty string
     return false;
   }
 
   if (count > (1024 * 1024)) {
+    // too large
     return false;
   }
 
@@ -1320,13 +1525,15 @@ bool DNGImage::SetUniqueCameraModel(const std::string &ascii) {
 
 bool DNGImage::SetMake(const std::string &ascii) {
   unsigned int count =
-      static_cast<unsigned int>(ascii.length() + 1);
+      static_cast<unsigned int>(ascii.length() + 1);  // +1 for '\0'
 
   if (count < 2) {
+    // empty string
     return false;
   }
 
   if (count > (1024 * 1024)) {
+    // too large
     return false;
   }
 
@@ -1345,13 +1552,15 @@ bool DNGImage::SetMake(const std::string &ascii) {
 
 bool DNGImage::SetCameraModelName(const std::string &ascii) {
   unsigned int count =
-      static_cast<unsigned int>(ascii.length() + 1);
+      static_cast<unsigned int>(ascii.length() + 1);  // +1 for '\0'
 
   if (count < 2) {
+    // empty string
     return false;
   }
 
   if (count > (1024 * 1024)) {
+    // too large
     return false;
   }
 
@@ -1370,13 +1579,15 @@ bool DNGImage::SetCameraModelName(const std::string &ascii) {
 
 bool DNGImage::SetSoftware(const std::string &ascii) {
   unsigned int count =
-      static_cast<unsigned int>(ascii.length() + 1);
+      static_cast<unsigned int>(ascii.length() + 1);  // +1 for '\0'
 
   if (count < 2) {
+    // empty string
     return false;
   }
 
   if (count > 4096) {
+    // too large
     return false;
   }
 
@@ -1454,12 +1665,14 @@ bool DNGImage::SetColorMatrix1(const unsigned int plane_count,
   for (size_t i = 0; i * 2 < vs.size(); i++) {
     float numerator, denominator;
     if (FloatToRational(matrix_values[i], &numerator, &denominator) != 0) {
+      // Couldn't represent fp value as integer rational value.
       return false;
     }
 
     vs[2 * i + 0] = static_cast<int>(numerator);
     vs[2 * i + 1] = static_cast<int>(denominator);
 
+    // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
     if (swap_endian_) {
       swap4(&vs[2 * i + 0]);
       swap4(&vs[2 * i + 1]);
@@ -1484,12 +1697,14 @@ bool DNGImage::SetColorMatrix2(const unsigned int plane_count,
   for (size_t i = 0; i * 2 < vs.size(); i++) {
     float numerator, denominator;
     if (FloatToRational(matrix_values[i], &numerator, &denominator) != 0) {
+      // Couldn't represent fp value as integer rational value.
       return false;
     }
 
     vs[2 * i + 0] = static_cast<int>(numerator);
     vs[2 * i + 1] = static_cast<int>(denominator);
 
+    // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
     if (swap_endian_) {
       swap4(&vs[2 * i + 0]);
       swap4(&vs[2 * i + 1]);
@@ -1514,12 +1729,14 @@ bool DNGImage::SetForwardMatrix1(const unsigned int plane_count,
   for (size_t i = 0; i * 2 < vs.size(); i++) {
     float numerator, denominator;
     if (FloatToRational(matrix_values[i], &numerator, &denominator) != 0) {
+      // Couldn't represent fp value as integer rational value.
       return false;
     }
 
     vs[2 * i + 0] = static_cast<int>(numerator);
     vs[2 * i + 1] = static_cast<int>(denominator);
 
+    // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
     if (swap_endian_) {
       swap4(&vs[2 * i + 0]);
       swap4(&vs[2 * i + 1]);
@@ -1544,12 +1761,14 @@ bool DNGImage::SetForwardMatrix2(const unsigned int plane_count,
   for (size_t i = 0; i * 2 < vs.size(); i++) {
     float numerator, denominator;
     if (FloatToRational(matrix_values[i], &numerator, &denominator) != 0) {
+      // Couldn't represent fp value as integer rational value.
       return false;
     }
 
     vs[2 * i + 0] = static_cast<int>(numerator);
     vs[2 * i + 1] = static_cast<int>(denominator);
 
+    // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
     if (swap_endian_) {
       swap4(&vs[2 * i + 0]);
       swap4(&vs[2 * i + 1]);
@@ -1574,12 +1793,14 @@ bool DNGImage::SetCameraCalibration1(const unsigned int plane_count,
   for (size_t i = 0; i * 2 < vs.size(); i++) {
     float numerator, denominator;
     if (FloatToRational(matrix_values[i], &numerator, &denominator) != 0) {
+      // Couldn't represent fp value as integer rational value.
       return false;
     }
 
     vs[2 * i + 0] = static_cast<unsigned int>(numerator);
     vs[2 * i + 1] = static_cast<unsigned int>(denominator);
 
+    // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
     if (swap_endian_) {
       swap4(&vs[2 * i + 0]);
       swap4(&vs[2 * i + 1]);
@@ -1604,12 +1825,14 @@ bool DNGImage::SetCameraCalibration2(const unsigned int plane_count,
   for (size_t i = 0; i * 2 < vs.size(); i++) {
     float numerator, denominator;
     if (FloatToRational(matrix_values[i], &numerator, &denominator) != 0) {
+      // Couldn't represent fp value as integer rational value.
       return false;
     }
 
     vs[2 * i + 0] = static_cast<unsigned int>(numerator);
     vs[2 * i + 1] = static_cast<unsigned int>(denominator);
 
+    // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
     if (swap_endian_) {
       swap4(&vs[2 * i + 0]);
       swap4(&vs[2 * i + 1]);
@@ -1634,12 +1857,14 @@ bool DNGImage::SetAnalogBalance(const unsigned int plane_count,
   for (size_t i = 0; i * 2 < vs.size(); i++) {
     float numerator, denominator;
     if (FloatToRational(matrix_values[i], &numerator, &denominator) != 0) {
+      // Couldn't represent fp value as integer rational value.
       return false;
     }
 
     vs[2 * i + 0] = static_cast<unsigned int>(numerator);
     vs[2 * i + 1] = static_cast<unsigned int>(denominator);
 
+    // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
     if (swap_endian_) {
       swap4(&vs[2 * i + 0]);
       swap4(&vs[2 * i + 1]);
@@ -1759,12 +1984,14 @@ bool DNGImage::SetAsShotNeutral(const unsigned int plane_count,
   for (size_t i = 0; i * 2 < vs.size(); i++) {
     float numerator, denominator;
     if (FloatToRational(matrix_values[i], &numerator, &denominator) != 0) {
+      // Couldn't represent fp value as integer rational value.
       return false;
     }
 
     vs[2 * i + 0] = static_cast<unsigned int>(numerator);
     vs[2 * i + 1] = static_cast<unsigned int>(denominator);
 
+    // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
     if (swap_endian_) {
       swap4(&vs[2 * i + 0]);
       swap4(&vs[2 * i + 1]);
@@ -1789,12 +2016,14 @@ bool DNGImage::SetAsShotWhiteXY(const float x, const float y) {
   for (size_t i = 0; i * 2 < vs.size(); i++) {
     float numerator, denominator;
     if (FloatToRational(values[i], &numerator, &denominator) != 0) {
+      // Couldn't represent fp value as integer rational value.
       return false;
     }
 
     vs[2 * i + 0] = static_cast<unsigned int>(numerator);
     vs[2 * i + 1] = static_cast<unsigned int>(denominator);
 
+    // TODO(syoyo): Swap rational value(8 bytes) when writing IFD tag, not here.
     if (swap_endian_) {
       swap4(&vs[2 * i + 0]);
       swap4(&vs[2 * i + 1]);
@@ -1816,6 +2045,7 @@ bool DNGImage::SetAsShotWhiteXY(const float x, const float y) {
 bool DNGImage::SetBaselineExposure(float value) {
   float numerator, denominator;
   if (FloatToRational(value, &numerator, &denominator) != 0) {
+    // Couldn't represent fp value as integer rational value.
     return false;
   }
 
@@ -1835,9 +2065,9 @@ bool DNGImage::SetBaselineExposure(float value) {
   return true;
 }
 
-bool DNGImage::SetNoiseProfile(const double values[6]) {
-  std::vector<double> vs(6);
-  for (size_t i = 0; i < 6; i++) {
+bool DNGImage::SetNoiseProfile(const unsigned int num_values, const double *values) {
+  std::vector<double> vs(num_values);
+  for (size_t i = 0; i < num_values; i++) {
     vs[i] = values[i];
     if (swap_endian_) {
       swap8(reinterpret_cast<uint64_t*>(&vs[i]));
@@ -1845,7 +2075,7 @@ bool DNGImage::SetNoiseProfile(const double values[6]) {
   }
 
   bool ret = WriteTIFFTag(
-      static_cast<unsigned short>(TIFFTAG_NOISE_PROFILE), TIFF_DOUBLE, 6,
+      static_cast<unsigned short>(TIFFTAG_NOISE_PROFILE), TIFF_DOUBLE, num_values,
       reinterpret_cast<const unsigned char *>(vs.data()), &ifd_tags_, &data_os_);
 
   if (!ret) {
@@ -1862,15 +2092,18 @@ bool DNGImage::SetLinearizationTable(const unsigned int table_size, const unsign
     return false;
   }
 
+  // Validate table size - common sizes are 256, 1024, 4096, 16384, 65536
   if (table_size > 65536) {
     err_ += "Linearization table size too large (max 65536 entries).\n";
     return false;
   }
 
+  // Create a copy of the table values for endian swapping if needed
   std::vector<unsigned short> vs(table_size);
   for (size_t i = 0; i < table_size; i++) {
     vs[i] = table_values[i];
     
+    // Swap endian if needed
     if (swap_endian_) {
       swap2(&vs[i]);
     }
@@ -1936,6 +2169,8 @@ bool DNGImage::SetImageData(const unsigned char *data, const size_t data_len) {
   data_os_.write(reinterpret_cast<const char *>(data),
                  static_cast<std::streamsize>(data_len));
 
+  // NOTE: STRIP_OFFSET tag will be written at `WriteIFDToStream()`.
+
   {
     unsigned int count = 1;
     unsigned int bytes = static_cast<unsigned int>(data_len);
@@ -1958,6 +2193,9 @@ bool DNGImage::SetImageData(const unsigned char *data, const size_t data_len) {
 bool DNGImage::SetCustomFieldLong(const unsigned short tag, const int value) {
   unsigned int count = 1;
 
+  // TODO(syoyo): Check if `tag` value does not conflict with existing TIFF tag
+  // value.
+
   bool ret = WriteTIFFTag(tag, TIFF_SLONG, count,
                           reinterpret_cast<const unsigned char *>(&value),
                           &ifd_tags_, &data_os_);
@@ -1973,6 +2211,9 @@ bool DNGImage::SetCustomFieldLong(const unsigned short tag, const int value) {
 bool DNGImage::SetCustomFieldULong(const unsigned short tag,
                                    const unsigned int value) {
   unsigned int count = 1;
+
+  // TODO(syoyo): Check if `tag` value does not conflict with existing TIFF tag
+  // value.
 
   bool ret = WriteTIFFTag(tag, TIFF_LONG, count,
                           reinterpret_cast<const unsigned char *>(&value),
@@ -2017,9 +2258,12 @@ bool DNGImage::WriteDataToStream(std::ostream *ofs) const {
   memcpy(data.data(), data_os_.str().data(), data.size());
 
   if (data_strip_bytes_ == 0) {
+    // May ok?.
   } else {
+    // FIXME(syoyo): Assume all channels use sample bps
     uint32_t bps = bits_per_samples_[0];
 
+    // We may need to swap endian for pixel data.
     if (swap_endian_) {
       if (bps == 16) {
         size_t n = data_strip_bytes_ / sizeof(uint16_t);
@@ -2065,8 +2309,11 @@ bool DNGImage::WriteIFDToStream(const unsigned int data_base_offset,
     return false;
   }
 
+  // add STRIP_OFFSET tag and sort IFD tags.
   std::vector<IFDTag> tags = ifd_tags_;
   {
+    // For STRIP_OFFSET we need the actual offset value to data(image),
+    // thus write STRIP_OFFSET here.
     unsigned int offset = strip_offset + kHeaderSize;
     IFDTag ifd;
     ifd.tag = TIFFTAG_STRIP_OFFSET;
@@ -2076,6 +2323,7 @@ bool DNGImage::WriteIFDToStream(const unsigned int data_base_offset,
     tags.push_back(ifd);
   }
 
+  // TIFF expects IFD tags are sorted.
   std::sort(tags.begin(), tags.end(), IFDComparator);
 
   std::ostringstream ifd_os;
@@ -2096,9 +2344,12 @@ bool DNGImage::WriteIFDToStream(const unsigned int data_base_offset,
       size_t len =
           ifd.count * (typesize_table[(ifd.type) < 14 ? (ifd.type) : 0]);
       if (len > 4) {
+        // Store offset value.
         unsigned int ifd_offt = ifd.offset_or_value + data_base_offset;
         Write4(ifd_offt, &ifd_os, swap_endian_);
       } else {
+        // less than 4 bytes = store data itself.
+
         if (len == 1) {
           const unsigned char value =
               *(reinterpret_cast<const unsigned char *>(&ifd.offset_or_value));
@@ -2129,6 +2380,7 @@ bool DNGImage::WriteIFDToStream(const unsigned int data_base_offset,
 
   return true;
 }
+
 
 DNGWriter::DNGWriter(bool big_endian) : dng_big_endian_(big_endian) {
   swap_endian_ = (IsBigEndian() != dng_big_endian_);
@@ -2180,6 +2432,7 @@ bool DNGWriter::WriteToFile(std::ostream& ofs, std::string *err) const {
     return false;
   }
 
+  // 1. Compute offset and data size(exclude TIFF header bytes)
   size_t data_len = 0;
   size_t strip_offset = 0;
   std::vector<size_t> data_offset_table;
@@ -2191,15 +2444,24 @@ bool DNGWriter::WriteToFile(std::ostream& ofs, std::string *err) const {
     data_len += images_[i]->GetDataSize();
   }
 
+  // 2. Write offset to ifd table.
   const unsigned int ifd_offset =
       kHeaderSize + static_cast<unsigned int>(data_len);
   Write4(ifd_offset, &header, swap_endian_);
 
   assert(header.str().length() == 8);
 
+  // std::cout << "ifd_offset " << ifd_offset << std::endl;
+  // std::cout << "data_len " << data_os_.str().length() << std::endl;
+  // std::cout << "ifd_len " << ifd_os_.str().length() << std::endl;
+  // std::cout << "swap endian " << swap_endian_ << std::endl;
+
+  // 3. Write header
   ofs.write(header.str().c_str(),
             static_cast<std::streamsize>(header.str().length()));
 
+  // 4. Write image and meta data
+  // TODO(syoyo): Write IFD first, then image/meta data
   for (size_t i = 0; i < images_.size(); i++) {
     bool ok = images_[i]->WriteDataToStream(&ofs);
     if (!ok) {
@@ -2212,6 +2474,7 @@ bool DNGWriter::WriteToFile(std::ostream& ofs, std::string *err) const {
     }
   }
 
+  // 5. Write IFD entries;
   for (size_t i = 0; i < images_.size(); i++) {
     bool ok = images_[i]->WriteIFDToStream(
         static_cast<unsigned int>(data_offset_table[i]),
@@ -2242,6 +2505,8 @@ bool DNGWriter::WriteToFile(std::ostream& ofs, std::string *err) const {
   return true;
 }
 
+// Opcode List implementations
+
 void OpcodeList::AddWarpRectilinear(const WarpRectilinearParams& params) {
   Opcode opcode;
   opcode.id = OPCODE_WARP_RECTILINEAR;
@@ -2250,19 +2515,23 @@ void OpcodeList::AddWarpRectilinear(const WarpRectilinearParams& params) {
   
   std::ostringstream data_stream;
   
+  // Write parameters (big-endian as per DNG spec for opcode blocks)
   Write4(params.num_coeff_sets, &data_stream, true);
   
   for (size_t i = 0; i < params.num_coeff_sets; i++) {
+    // Write radial coefficients (kr0, kr1, kr2, kr3)
     double kr0 = i < params.kr0.size() ? params.kr0[i] : 1.0;
     double kr1 = i < params.kr1.size() ? params.kr1[i] : 0.0;
     double kr2 = i < params.kr2.size() ? params.kr2[i] : 0.0;
     double kr3 = i < params.kr3.size() ? params.kr3[i] : 0.0;
     
+    // Write doubles in big-endian
     WriteDouble(kr0, &data_stream, true);
     WriteDouble(kr1, &data_stream, true);
     WriteDouble(kr2, &data_stream, true);
     WriteDouble(kr3, &data_stream, true);
     
+    // Write tangential coefficients (kt0, kt1)
     double kt0 = i < params.kt0.size() ? params.kt0[i] : 0.0;
     double kt1 = i < params.kt1.size() ? params.kt1[i] : 0.0;
     
@@ -2270,6 +2539,7 @@ void OpcodeList::AddWarpRectilinear(const WarpRectilinearParams& params) {
     WriteDouble(kt1, &data_stream, true);
   }
   
+  // Write optical center
   WriteDouble(params.cx_hat, &data_stream, true);
   WriteDouble(params.cy_hat, &data_stream, true);
   
@@ -2287,15 +2557,18 @@ void OpcodeList::AddFixBadPixelsList(const FixBadPixelsParams& params) {
   
   std::ostringstream data_stream;
   
+  // Write parameters (big-endian)
   Write4(params.bayer_phase, &data_stream, true);
   Write4(static_cast<unsigned int>(params.bad_pixels.size()), &data_stream, true);
   Write4(static_cast<unsigned int>(params.bad_rects.size()), &data_stream, true);
   
+  // Write bad pixels
   for (const auto& pixel : params.bad_pixels) {
     Write4(pixel.row, &data_stream, true);
     Write4(pixel.column, &data_stream, true);
   }
   
+  // Write bad rectangles
   for (const auto& rect : params.bad_rects) {
     Write4(rect.top, &data_stream, true);
     Write4(rect.left, &data_stream, true);
@@ -2312,6 +2585,7 @@ void OpcodeList::AddFixBadPixelsList(const FixBadPixelsParams& params) {
 void OpcodeList::AddGainMap(const GainMapParams& params) {
   Opcode opcode;
   opcode.id = OPCODE_GAIN_MAP;
+  // DNG version 1.3.0.0
   opcode.version[0] = 1; opcode.version[1] = 3; opcode.version[2] = 0; opcode.version[3] = 0;
   opcode.flags = 0;
   
@@ -2377,9 +2651,11 @@ std::vector<unsigned char> OpcodeList::Serialize() const {
   return std::vector<unsigned char>(data_str.begin(), data_str.end());
 }
 
+
+
 bool DNGImage::SetOpcodeList1(const OpcodeList& opcode_list) {
   if (opcode_list.IsEmpty()) {
-    return true;
+    return true; 
   }
   
   std::vector<unsigned char> data = opcode_list.Serialize();
@@ -2400,7 +2676,7 @@ bool DNGImage::SetOpcodeList1(const OpcodeList& opcode_list) {
 
 bool DNGImage::SetOpcodeList2(const OpcodeList& opcode_list) {
   if (opcode_list.IsEmpty()) {
-    return true;
+    return true; 
   }
   
   std::vector<unsigned char> data = opcode_list.Serialize();
@@ -2444,7 +2720,7 @@ bool DNGImage::SetOpcodeList3(const OpcodeList& opcode_list) {
 #pragma clang diagnostic pop
 #endif
 
-}
+}  // namespace tinydngwriter
 
 namespace tinydngwriter {
 
@@ -2454,25 +2730,40 @@ inline bool DNGImage::SetMatrixTag(unsigned short tag, const float m[9]) {
         data[i*2] = static_cast<int32_t>(m[i] * 10000.0f);
         data[i*2+1] = 10000;
     }
-    return WriteTIFFTag(tag, 10, 9, 
+    return WriteTIFFTag(tag, 10 /* TIFF_SRATIONAL */, 9, 
                         reinterpret_cast<const unsigned char*>(data), &ifd_tags_, &data_os_);
 }
 
 inline bool DNGImage::SetShortTag(unsigned short tag, unsigned short val) {
-    return WriteTIFFTag(tag, 3, 1, 
+    return WriteTIFFTag(tag, 3 /* TIFF_SHORT */, 1, 
                         reinterpret_cast<const unsigned char*>(&val), &ifd_tags_, &data_os_);
 }
 
 inline bool DNGImage::SetLongArrayTag(unsigned short tag, unsigned int count, const unsigned int* val) {
-    return WriteTIFFTag(tag, 4, count, 
+    return WriteTIFFTag(tag, 4 /* TIFF_LONG */, count, 
                         reinterpret_cast<const unsigned char*>(val), &ifd_tags_, &data_os_);
 }
 
 inline bool DNGImage::SetStringTag(unsigned short tag, const char* str) {
-    return WriteTIFFTag(tag, 2, strlen(str) + 1, 
+    return WriteTIFFTag(tag, 2 /* TIFF_ASCII */, strlen(str) + 1, 
                         reinterpret_cast<const unsigned char*>(str), &ifd_tags_, &data_os_);
 }
 
+inline bool DNGImage::SetByteArrayTag(unsigned short tag, const unsigned char* data, size_t size) {
+    return WriteTIFFTag(tag, 1 /* TIFF_BYTE */, size, 
+                        data, &ifd_tags_, &data_os_);
 }
 
-#endif
+inline bool DNGImage::SetRationalTag(unsigned short tag, unsigned int num, unsigned int den) {
+    unsigned int data[2] = {num, den};
+    if (swap_endian_) {
+        swap4(&data[0]);
+        swap4(&data[1]);
+    }
+    return WriteTIFFTag(tag, 5 /* TIFF_RATIONAL */, 1, 
+                        reinterpret_cast<const unsigned char*>(data), &ifd_tags_, &data_os_);
+}
+
+} // namespace tinydngwriter
+
+#endif  // TINY_DNG_WRITER_IMPLEMENTATION
