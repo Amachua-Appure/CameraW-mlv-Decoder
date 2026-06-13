@@ -6,6 +6,7 @@
 #include <cstring>
 #include <algorithm>
 #include <limits>
+#include <sstream> 
 
 #define TINY_DNG_WRITER_IMPLEMENTATION
 #include "tiny_dng_writer.h"
@@ -27,11 +28,30 @@ struct CustomWbal {
     uint32_t wb_b;
     uint32_t wb_g2;
 };
+
+struct GyroSample {
+    uint64_t timestamp; 
+    float pitch_rate;  
+    float yaw_rate;     
+    float roll_rate;    
+    uint32_t pad;      
+};
 #pragma pack(pop)
 
 static std::vector<double> current_noise_profile;
 static std::vector<float> current_lsc_map;
 static int current_lsc_w = 0, current_lsc_h = 0;
+
+static float current_focus_distance = 0.0f;
+static int current_lens_state = 0;
+static uint64_t current_rolling_shutter = 0;
+static uint64_t current_frame_duration = 0;
+
+static float current_dyn_bl[4] = {0.0f};
+static float current_neutral[3] = {0.0f};
+static uint32_t current_dyn_wl = 0;
+
+static std::vector<GyroSample> global_gyro_data;
 
 static std::vector<double> initial_noise_profile;
 static std::vector<float> initial_lsc_map;
@@ -113,7 +133,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::ifstream file(argv[1], std::ios::binary);
+    std::string input_filename = argv[1];
+    std::ifstream file(input_filename, std::ios::binary);
     if (!file) {
         std::cerr << "Could not open file.\n";
         return 1;
@@ -125,7 +146,7 @@ int main(int argc, char** argv) {
     float color_matrix[9] = {1,0,0, 0,1,0, 0,0,1};
     float as_shot_neutral[3] = {1.0f, 1.0f, 1.0f};
     int iso = 0;
-    float exposure_time = 0.0f;
+    uint32_t shutter_us = 0;  
     float focal_length = 0.0f;
     float aperture = 0.0f;
     char date_time[64] = {0};
@@ -134,7 +155,7 @@ int main(int argc, char** argv) {
     int audio_sample_rate = 48000;
     int audio_channels = 2;
 
-    std::cout << "Pass 1: Scanning for Audio..." << std::endl;
+    std::cout << "Pass 1: Scanning for Audio and Gyro..." << std::endl;
 
     while (file) {
         MlvHdr hdr;
@@ -172,7 +193,7 @@ int main(int argc, char** argv) {
             file.seekg(-8, std::ios::cur);
             file.read((char*)&c2md, sizeof(c2md));
 
-            initial_noise_profile.assign(c2md.noiseProfile, c2md.noiseProfile + 6);
+            initial_noise_profile.assign(c2md.noiseProfile, c2md.noiseProfile + 8);
 
             size_t lsc_size = c2md.lscWidth * c2md.lscHeight * 4;
             if (lsc_size > 0) {
@@ -183,6 +204,23 @@ int main(int argc, char** argv) {
             }
 
             int bytes_read = sizeof(c2md) + (lsc_size * sizeof(float));
+            if (hdr.size > bytes_read) {
+                file.seekg(hdr.size - bytes_read, std::ios::cur);
+            }
+
+        } else if (typeStr == "GYRO") {
+            uint64_t gyro_ts;
+            file.read((char*)&gyro_ts, 8); 
+            size_t payload_size = hdr.size - 16; 
+            size_t num_samples = payload_size / sizeof(GyroSample);
+            
+            for (size_t i = 0; i < num_samples; i++) {
+                GyroSample sample;
+                file.read((char*)&sample, sizeof(GyroSample));
+                global_gyro_data.push_back(sample);
+            }
+
+            size_t bytes_read = 16 + (num_samples * sizeof(GyroSample));
             if (hdr.size > bytes_read) {
                 file.seekg(hdr.size - bytes_read, std::ios::cur);
             }
@@ -215,6 +253,34 @@ int main(int argc, char** argv) {
         raw_audio_data.shrink_to_fit();
     } else {
         std::cout << "No audio stream found in MLV.\n" << std::endl;
+    }
+
+    if (!global_gyro_data.empty()) {
+        std::sort(global_gyro_data.begin(), global_gyro_data.end(),
+                  [](const GyroSample& a, const GyroSample& b) {
+                      return a.timestamp < b.timestamp;
+                  });
+
+        std::string gcsv_filename = input_filename + ".gcsv";
+        std::ofstream gcsv(gcsv_filename);
+        if (gcsv) {
+            gcsv << "GYROFLOW IMU LOG\n"
+                 << "version,1.2\n"
+                 << "id,CameraW\n"
+                 << "orientation,YxZ\n"
+                 << "tscale,1e-09\n\n";
+            gcsv << "timestamp,gx,gy,gz\n";
+            
+            for (const auto& sample : global_gyro_data) {
+                double timestamp_us = sample.timestamp / 1000.0;
+                gcsv << std::fixed << timestamp_us << "," 
+                     << sample.pitch_rate << "," << sample.yaw_rate << "," << sample.roll_rate << "\n";
+            }
+            gcsv.close();
+            std::cout << "Extracted Gyroflow Sidecar: " << gcsv_filename << "\n\n";
+        }
+        global_gyro_data.clear();
+        global_gyro_data.shrink_to_fit();
     }
 
     std::cout << "Pass 2: Extracting DNG frames..." << std::endl;
@@ -259,7 +325,7 @@ int main(int argc, char** argv) {
             file.read((char*)&expo, sizeof(expo));
 
             iso = expo.isoValue;
-            exposure_time = (float)expo.shutterValue / 1000000.0f;
+            shutter_us = expo.shutterValue; 
 
             file.seekg(hdr.size - sizeof(expo), std::ios::cur);
 
@@ -310,7 +376,7 @@ int main(int argc, char** argv) {
             file.seekg(-8, std::ios::cur);
             file.read((char*)&c2md, sizeof(c2md));
 
-            current_noise_profile.assign(c2md.noiseProfile, c2md.noiseProfile + 6);
+            current_noise_profile.assign(c2md.noiseProfile, c2md.noiseProfile + 8);
 
             size_t lsc_size = c2md.lscWidth * c2md.lscHeight * 4;
             if (lsc_size > 0) {
@@ -319,6 +385,15 @@ int main(int argc, char** argv) {
             }
             current_lsc_w = c2md.lscWidth;
             current_lsc_h = c2md.lscHeight;
+
+            current_focus_distance = c2md.focusDistance;
+            current_lens_state = c2md.lensState;
+            current_rolling_shutter = c2md.rollingShutterSkew;
+            current_frame_duration = c2md.frameDuration;
+
+            memcpy(current_dyn_bl, c2md.dynamicBlackLevel, sizeof(current_dyn_bl));
+            memcpy(current_neutral, c2md.neutralColorPoint, sizeof(current_neutral));
+            current_dyn_wl = c2md.dynamicWhiteLevel;
 
             if (has_crop) {
                 cropLSCMap();
@@ -336,6 +411,9 @@ int main(int argc, char** argv) {
             file.seekg(hdr.size - sizeof(global_crop), std::ios::cur);
             std::cout << "Loaded CROP metadata: active=" << global_crop.active_w << "x" << global_crop.active_h
                       << " offset=(" << global_crop.offset_x << "," << global_crop.offset_y << ")\n";
+
+        } else if (typeStr == "GYRO") {
+            file.seekg(hdr.size - 8, std::ios::cur);
 
         } else if (typeStr == "VIDF") {
             file.seekg(24, std::ios::cur);
@@ -481,18 +559,32 @@ int main(int argc, char** argv) {
 
                 dng.SetDNGVersion(1, 4, 0, 0);
                 dng.SetDNGBackwardVersion(1, 1, 0, 0);
-                dng.SetMake("SpeedoCam");
+                dng.SetMake("CameraW");
 
                 dng.SetColorMatrix1(3, color_matrix);
-                dng.SetAsShotNeutral(3, as_shot_neutral);
+                
+                if (current_neutral[0] > 0.0f) 
+                    dng.SetAsShotNeutral(3, current_neutral);
+                else 
+                    dng.SetAsShotNeutral(3, as_shot_neutral);
+                
                 dng.SetIso(iso);
-                if (exposure_time > 0) dng.SetExposureTime(exposure_time);
+                
+                if (shutter_us > 0) dng.SetRationalTag(33434, shutter_us, 1000000);
+                
                 if (focal_length > 0) dng.SetFocalLength(focal_length);
                 if (aperture > 0) dng.SetAperture(aperture);
 
-                dng.SetWhiteLevel(white_lvl);
+                dng.SetWhiteLevel(current_dyn_wl > 0 ? current_dyn_wl : white_lvl);
 
-                if (has_c2st) {
+                if (current_dyn_bl[0] > 0.0f) {
+                    unsigned short bl[4] = { (unsigned short)current_dyn_bl[0],
+                                             (unsigned short)current_dyn_bl[1],
+                                             (unsigned short)current_dyn_bl[2],
+                                             (unsigned short)current_dyn_bl[3] };
+                    dng.SetBlackLevelRepeatDim(2, 2);
+                    dng.SetBlackLevel(4, bl);
+                } else if (has_c2st) {
                     unsigned short bl[4] = { global_c2st.blackLevel[0], global_c2st.blackLevel[1],
                                              global_c2st.blackLevel[2], global_c2st.blackLevel[3] };
                     dng.SetBlackLevelRepeatDim(2, 2);
@@ -534,11 +626,12 @@ int main(int argc, char** argv) {
 
                 if (has_c2st) {
                     dng.SetStringTag(305, global_c2st.software);
+                    
                     unsigned int activeArea[4] = {
-                        0,
-                        0,
-                        (unsigned int)height,
-                        (unsigned int)width
+                        (unsigned int)global_c2st.activeArea[0], 
+                        (unsigned int)global_c2st.activeArea[1], 
+                        (unsigned int)global_c2st.activeArea[2], 
+                        (unsigned int)global_c2st.activeArea[3]  
                     };
                     dng.SetLongArrayTag(50829, 4, activeArea);
                     dng.SetShortTag(50778, global_c2st.illuminant1);
@@ -551,8 +644,25 @@ int main(int argc, char** argv) {
                 }
 
                 if (!current_noise_profile.empty()) {
-                    dng.SetNoiseProfile(current_noise_profile.data());
+                    dng.SetNoiseProfile(current_noise_profile.size(), current_noise_profile.data());
                 }
+
+                std::stringstream xmp;
+                xmp << "<?xpacket begin=\"\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n"
+                    << "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n"
+                    << "  <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
+                    << "    <rdf:Description rdf:about=\"\" xmlns:cameraw=\"cameraw/2.4/\">\n"
+                    << "      <cameraw:FocusDistance>" << current_focus_distance << "</cameraw:FocusDistance>\n"
+                    << "      <cameraw:LensState>" << current_lens_state << "</cameraw:LensState>\n"
+                    << "      <cameraw:RollingShutterSkew>" << current_rolling_shutter << "</cameraw:RollingShutterSkew>\n"
+                    << "      <cameraw:FrameDuration>" << current_frame_duration << "</cameraw:FrameDuration>\n"
+                    << "    </rdf:Description>\n"
+                    << "  </rdf:RDF>\n"
+                    << "</x:xmpmeta>\n"
+                    << "<?xpacket end=\"w\"?>";
+                
+                std::string xmp_str = xmp.str();
+                dng.SetByteArrayTag(700, reinterpret_cast<const unsigned char*>(xmp_str.c_str()), xmp_str.length());
 
                 dng.SetImageData(reinterpret_cast<unsigned char*>(out_frame.data()), width * height * 2);
 
